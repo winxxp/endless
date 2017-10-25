@@ -17,10 +17,11 @@ import (
 	"time"
 
 	// "github.com/fvbock/uds-go/introspect"
+	"io"
 )
 
 const (
-	PRE_SIGNAL = iota
+	PRE_SIGNAL  = iota
 	POST_SIGNAL
 
 	STATE_INIT
@@ -45,6 +46,16 @@ var (
 	socketOrder string
 
 	hookableSignals []os.Signal
+
+	ExecFork = func(files []*os.File, env []string) error {
+		path := os.Args[0]
+		var args []string
+		if len(os.Args) > 1 {
+			args = os.Args[1:]
+		}
+
+		return ForkCore(os.Stdout, os.Stderr, files, env, path, args...)
+	}
 )
 
 func init() {
@@ -453,27 +464,7 @@ func (srv *endlessServer) fork() (err error) {
 		env = append(env, fmt.Sprintf(`ENDLESS_SOCKET_ORDER=%s`, strings.Join(orderArgs, ",")))
 	}
 
-	// log.Println(files)
-	path := os.Args[0]
-	var args []string
-	if len(os.Args) > 1 {
-		args = os.Args[1:]
-	}
-
-	cmd := exec.Command(path, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.ExtraFiles = files
-	cmd.Env = env
-
-	// cmd.SysProcAttr = &syscall.SysProcAttr{
-	// 	Setsid:  true,
-	// 	Setctty: true,
-	// 	Ctty:    ,
-	// }
-
-	err = cmd.Start()
-	if err != nil {
+	if err = ExecFork(files, env); err != nil {
 		log.Fatalf("Restart: Failed to launch, error: %v", err)
 	}
 
@@ -560,4 +551,14 @@ func (srv *endlessServer) RegisterSignalHook(prePost int, sig os.Signal, f func(
 	}
 	err = fmt.Errorf("Signal %v is not supported.", sig)
 	return
+}
+
+func ForkCore(stdout, stderr io.Writer, extraFiles []*os.File, env []string, name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	cmd.ExtraFiles = extraFiles
+	cmd.Env = env
+
+	return cmd.Start()
 }
